@@ -1,0 +1,118 @@
+# PIPELINE DEFINITION
+# Name: sklearn-train
+# Inputs:
+#    dataset: system.Dataset
+# Outputs:
+#    metrics: system.Metrics
+#    model: system.Model
+#    sklearn-train-metrics: system.Metrics
+components:
+  comp-sklearn-train:
+    executorLabel: exec-sklearn-train
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-sklearn-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - sklearn_train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet     --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'joblib' 'db-dtypes' 'kfp==2.0.1' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          python3 -m kfp.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef sklearn_train(\n    dataset: Input[Dataset],\n    metrics: Output[Metrics],\n\
+          \    model: Output[Model]\n):\n    from sklearn.tree import DecisionTreeClassifier\n\
+          \    from sklearn.metrics import roc_curve\n    from sklearn.model_selection\
+          \ import train_test_split\n    from joblib import dump\n\n    import pandas\
+          \ as pd\n    df = pd.read_csv(dataset.path)\n    labels = df.pop(\"Class\"\
+          ).tolist()\n    data = df.values.tolist()\n    x_train, x_test, y_train,\
+          \ y_test = train_test_split(data, labels)\n\n    skmodel = DecisionTreeClassifier()\n\
+          \    skmodel.fit(x_train,y_train)\n    score = skmodel.score(x_test,y_test)\n\
+          \    print('accuracy is:',score)\n\n    metrics.log_metric(\"accuracy\"\
+          ,(score * 100.0))\n    metrics.log_metric(\"framework\", \"Scikit Learn\"\
+          )\n    metrics.log_metric(\"dataset_size\", len(df))\n    dump(skmodel,\
+          \ model.path + \".joblib\")\n\n"
+        image: python:3.9
+pipelineInfo:
+  name: sklearn-train
+root:
+  dag:
+    outputs:
+      artifacts:
+        metrics:
+          artifactSelectors:
+          - outputArtifactKey: metrics
+            producerSubtask: sklearn-train
+        model:
+          artifactSelectors:
+          - outputArtifactKey: model
+            producerSubtask: sklearn-train
+        sklearn-train-metrics:
+          artifactSelectors:
+          - outputArtifactKey: metrics
+            producerSubtask: sklearn-train
+    tasks:
+      sklearn-train:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-sklearn-train
+        inputs:
+          artifacts:
+            dataset:
+              componentInputArtifact: dataset
+        taskInfo:
+          name: sklearn-train
+  inputDefinitions:
+    artifacts:
+      dataset:
+        artifactType:
+          schemaTitle: system.Dataset
+          schemaVersion: 0.0.1
+  outputDefinitions:
+    artifacts:
+      metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+      model:
+        artifactType:
+          schemaTitle: system.Model
+          schemaVersion: 0.0.1
+      sklearn-train-metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.0.1

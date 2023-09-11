@@ -1,0 +1,88 @@
+# PIPELINE DEFINITION
+# Name: get-dataframe
+# Inputs:
+#    bq_table: str
+# Outputs:
+#    output_data_path: system.Dataset
+components:
+  comp-get-dataframe:
+    executorLabel: exec-get-dataframe
+    inputDefinitions:
+      parameters:
+        bq_table:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_data_path:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-get-dataframe:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - get_dataframe
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-bigquery'\
+          \ 'pandas' 'pyarrow' 'db-dtypes' 'kfp==2.0.1' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          python3 -m kfp.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef get_dataframe(\n    bq_table: str,\n    output_data_path: OutputPath(\"\
+          Dataset\")\n):\n    from google.cloud import bigquery\n    import pandas\
+          \ as pd\n    import os\n\n    project_number = os.environ[\"CLOUD_ML_PROJECT_ID\"\
+          ]\n    bqclient = bigquery.Client(project=project_number)\n    table = bigquery.TableReference.from_string(\n\
+          \        bq_table\n    )\n    rows = bqclient.list_rows(\n        table\n\
+          \    )\n    dataframe = rows.to_dataframe(\n        create_bqstorage_client=True,\n\
+          \    )\n    dataframe = dataframe.sample(frac=1, random_state=2)\n    dataframe.to_csv(output_data_path)\n\
+          \n"
+        image: python:3.9
+pipelineInfo:
+  name: get-dataframe
+root:
+  dag:
+    outputs:
+      artifacts:
+        output_data_path:
+          artifactSelectors:
+          - outputArtifactKey: output_data_path
+            producerSubtask: get-dataframe
+    tasks:
+      get-dataframe:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-get-dataframe
+        inputs:
+          parameters:
+            bq_table:
+              componentInputParameter: bq_table
+        taskInfo:
+          name: get-dataframe
+  inputDefinitions:
+    parameters:
+      bq_table:
+        parameterType: STRING
+  outputDefinitions:
+    artifacts:
+      output_data_path:
+        artifactType:
+          schemaTitle: system.Dataset
+          schemaVersion: 0.0.1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.0.1
